@@ -16,8 +16,8 @@ This code includes a C tokenizer, parser, and almost certainly buggy declaration
 printer. The parser assumes that code being parsed is valid--or almost valid--GNU
 C99.
 
-This code exists as part of a much larger project. This code is used to generate a
-lot of other code based on C types.
+This code exists as part of a much larger project. In that project, this code is used
+as part of several code generators.
 
 [1] Note: I tried two Python C parsers some time ago, and so recent versions of 
 those parsers might meet my current needs. However, that is now beside the point
