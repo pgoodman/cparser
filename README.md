@@ -13,7 +13,7 @@ This is a sort-of GNU C99 declaration parser. This parser exists because:
     parsing glibc/Linux kernel headers.
 
 This code includes a C tokenizer, parser, and almost certainly buggy declaration
-printer. The parser assumes that code being parsed is valid--or almost valid--GNU
+printer. The parser assumes that code being parsed is valid--or almost valid--pre-processed GNU
 C99.
 
 This code exists as part of a much larger project. In that project, this code is used
