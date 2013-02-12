@@ -17,8 +17,15 @@ printer. The parser assumes that code being parsed is valid--or almost valid--GN
 C99.
 
 This code exists as part of a much larger project. In that project, this code is used
-as part of several code generators.
+as part of several code generators. The current focus of this other project is type and
+function declarations, hence the emphasis on those aspects of the language and a
+complete lack of code to parse normal expressions / statements.
 
 [1] Note: I tried two Python C parsers some time ago, and so recent versions of 
 those parsers might meet my current needs. However, that is now beside the point
 because this parser meets my current needs rather well.
+
+Maintenance
+-----------
+I will update this library as I discover bugs in it. I also welcome updates from
+interested third parties.
