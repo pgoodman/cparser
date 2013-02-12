@@ -1,5 +1,5 @@
-cparser
-=======
+Python GNU C99 Declaration Parser
+=================================
 
 This is a sort-of GNU C99 declaration parser. This parser exists because:
   * I needed to parse glibc headers, Linux kernel headers, and libc as on
