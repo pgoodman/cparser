@@ -1,7 +1,8 @@
 """C Parser.
 
-This module defines a C tokenizer and parser. The result of parsing is an
-abstract syntax tree.
+This module defines a C tokenizer and parser. The result of parsing is 
+mostly an internal AST-like representation of declarations and their
+types.
 
 This module assumes that the input source code is valid, pre-processed C. That
 is, this parser makes no attempts to discover or report syntax or semantic
@@ -30,7 +31,7 @@ supposed other module) for perfectly matching object layouts with what the
 targeted compiler would generate.
 
 Author:       Peter Goodman (peter.goodman@gmail.com)
-Copyright:    Copyright 2012 Peter Goodman, all rights reserved.
+Copyright:    Copyright 2012-2013 Peter Goodman, all rights reserved.
 """
 
 
@@ -81,6 +82,7 @@ class CToken(object):
   TYPEOF                    = 52
 
   EOF                       = 60
+  COMMENT                   = 61
 
   # mapping of reserved words to token kinds
   RESERVED = {
@@ -621,6 +623,15 @@ class CType(object):
       ctype = ctype.ctype
     return ctype
 
+  def is_type_use(self):
+    is_use = False
+    prev_ctype, ctype = None, self
+    while prev_ctype != ctype:
+      prev_ctype = ctype
+      ctype = ctype.unattributed_type().unaliased_type()
+
+    return isinstance(ctype, CTypeUse)
+
   def base_type(self):
     prev_type = None
     ctype = self
@@ -638,8 +649,8 @@ class CTypeCompound(CType):
 class CTypeStruct(CTypeCompound):
   """Represents a structure type."""
 
-  __slots__ = ('_id', 'name', 'internal_name', 'had_name',
-               '_fields', '_field_list', 'has_name',
+  __slots__ = ('_id', 'name', 'internal_name', 'original_name', 
+               'had_name', '_fields', '_field_list', 'has_name',
                'parent_ctype')
   ID = 0
 
@@ -653,6 +664,7 @@ class CTypeStruct(CTypeCompound):
 
     self.had_name = self.has_name
     self.internal_name = name_
+    self.original_name = self.internal_name
     self.name = "struct " + name_
     self.parent_ctype = None
     self._fields = {}
@@ -682,8 +694,8 @@ class CTypeStruct(CTypeCompound):
 class CTypeUnion(CTypeCompound):
   """Represents a union type."""
 
-  __slots__ = ('_id', 'name', 'internal_name', 'had_name',
-               '_fields', '_field_list', 'has_name',
+  __slots__ = ('_id', 'name', 'internal_name', 'original_name', 
+               'had_name', '_fields', '_field_list', 'has_name',
                'parent_ctype')
   ID = 0
   
@@ -697,6 +709,7 @@ class CTypeUnion(CTypeCompound):
 
     self.had_name = self.has_name
     self.internal_name = name_
+    self.original_name = self.internal_name
     self.name = "union " + name_
     self.parent_ctype = None
     self._fields = {}
@@ -717,9 +730,8 @@ class CTypeUnion(CTypeCompound):
 class CTypeEnum(CTypeCompound):
   """Represents an enumeration type."""
 
-  __slots__ = ('_id', 'name', 'internal_name',
-               'fields', 'field_list', 'has_name',
-               'parent_ctype')
+  __slots__ = ('_id', 'name', 'internal_name', 'original_name',
+               'fields', 'field_list', 'has_name', 'parent_ctype')
   ID = 0
 
   BASE_EXPRESSION = CExpression([])
@@ -733,6 +745,7 @@ class CTypeEnum(CTypeCompound):
       name_ = "anon_enum_%d" % self._id
 
     self.internal_name = name_
+    self.original_name = self.internal_name
     self.name = "enum " + name_
     self.parent_ctype = None
     self.field_list = []
@@ -865,9 +878,14 @@ class CTypeAttributes(object):
       setattr(self, k, kargs[k])
 
   def has_default_attrs(self):
-    if self.is_const or self.is_register or self.is_auto or self.is_volatile:
+    if self.is_const \
+    or self.is_register \
+    or self.is_auto \
+    or self.is_volatile:
       return False
-    elif self.is_restrict or self.is_signed or self.is_unsigned:
+    elif self.is_restrict \
+    or self.is_signed \
+    or self.is_unsigned:
       return False
     return True
   
@@ -886,8 +904,8 @@ class CTypeAttributes(object):
 
 class CTypeNameAttributes(object):
   """Defines attributes specific to some named object. These attributes
-  include both visibility specifiers as well as function/variable extended
-  attributes."""
+  include both visibility specifiers as well as function/variable 
+  extended attributes."""
 
   __slots__ = ('attrs', 'is_inline', 'is_extern', 'is_static')
 
@@ -1065,6 +1083,9 @@ class CSymbolTable(object):
 
   def vars(self):
     return iter(self._vars.items())
+
+  def types(self):
+    return iter(self._types[CTypeStruct].items())
 
   def has_var(self, name):
     return name in self._vars
@@ -1286,6 +1307,7 @@ class CParser(object):
 
       #if is_typedef:
       #  print carat.line, carat.column
+      #  print toks
 
       assert not is_typedef
 
@@ -1529,8 +1551,12 @@ class CParser(object):
           # terms of another typedef'd type. If so, canonicalize
           # on the new typedef by setting the internal `is_missing`
           # to True so that the interval value will be updated later.
+          #
+          # we potentially have a `T V` where `T` is the type and `V`
+          # is the variable, but `V` also names a type.
           if isinstance(ctype, CTypeUse) \
-          and isinstance(ctype.ctype, CTypeDefinition):
+          and isinstance(ctype.ctype, CTypeDefinition) \
+          and defines_type:
             assert False
             found_ctype.is_missing = True
             i -= 1
@@ -1817,9 +1843,15 @@ class CParser(object):
   #   a wrapped version of `base`.
   def _parse_pointers(self, base, toks, i):
     assert base
+    name_attrs = CTypeNameAttributes()
+    has_attrs = False
     while i < len(toks):
       t = toks[i]
       if "*" == t.str:
+        if has_attrs:
+          base = CTypeAttributed(base, name_attrs)
+          has_attrs = False
+          name_attrs = CTypeNameAttributes()
         base = CTypePointer(base)
 
       # qualifiers: const, restrict, volatile
@@ -1840,9 +1872,25 @@ class CParser(object):
         assert not getattr(base, attr_name)
         setattr(base, attr_name, True)
 
+      # compiler-specific attributes (parameterized)
+      elif CToken.EXTENSION == t.kind:
+        extension_toks = []
+        i = self._get_up_to_balanced(toks, extension_toks, i - 1, "(", include=True)
+        name_attrs.attrs[name_attrs.LEFT].extend(extension_toks)
+        has_attrs = True
+        continue
+
+      # compiler-specific attributes (non-parameterized)
+      elif CToken.EXTENSION_NO_PARAM == t.kind:
+        name_attrs.attrs[name_attrs.LEFT].append(t)
+        has_attrs = True
+
       else:
         break
       i += 1
+
+    if has_attrs:
+      base = CTypeAttributed(base, name_attrs)
 
     return (i, base)
 
@@ -2105,6 +2153,9 @@ class CParser(object):
   def vars(self):
     return self.stab.vars()
 
+  def types(self):
+    return self.stab.types()
+
 
   # Get the type of a variable.
   def get_var(self, name):
@@ -2130,6 +2181,26 @@ def has_extension_attribute(ctype, attr_name):
           return True
     ctype = ctype.ctype.unaliased_type()
   return False
+
+
+def has_attribute(ctype, attr_name):
+  attr = 'is_' + attr_name
+  prev_ctype = None
+  while prev_ctype != ctype:
+    prev_ctype = ctype
+    if hasattr(ctype, attr):
+      return getattr(ctype, attr)
+
+    if isinstance(ctype, CTypeAttributed):
+      if hasattr(ctype.attrs, attr):
+        return getattr(ctype.attrs, attr)
+
+      ctype = ctype.ctype
+
+    else:
+      ctype = ctype.unaliased_type()
+  return False
+
 
 
 # for testing
