@@ -1,8 +1,9 @@
 """Reorder the declarations in a header so that all dependencies
 are met.
 
-Note: the header must be already pre-processed C and contain no function
-definitions, macro definitions, or pre-processor directives."""
+Author:       Peter Goodman (peter.goodman@gmail.com)
+Copyright:    Copyright 2012-2013 Peter Goodman, all rights reserved.
+"""
 
 import sys
 import collections
@@ -14,6 +15,7 @@ order_numbers = collections.defaultdict(int)
 seen = set()
 COMPOUNDS = set()
 CHANGED = False
+
 
 def O(*args):
   print "".join(map(str, args))
@@ -146,6 +148,7 @@ VISITORS = {
   CTypeStruct:        visit_struct,
 }
 
+
 TAB = ""
 
 def visit_ctype(ctype, is_value, need_value):
@@ -178,23 +181,208 @@ def should_include_unit(unit_decls, unit_toks, is_typedef):
     return True
 
   for ctype, name in unit_decls:
-    if name and not isinstance(ctype.base_type(), CTypeFunction):
+    if name:
+      base_type = ctype.base_type()
+
+      # Variable
+      if not isinstance(base_type, CTypeFunction):
+        return False
+
+      # Don't include functions returning floating point values.
+      else:
+        base_return_type = base_type.ret_type.base_type()
+        if isinstance(base_return_type, CTypeBuiltIn) \
+        and base_return_type.is_float:
+          return False
+
+    # Try not to include forward definitions of enums.
+    base_ctype = ctype.base_type()
+    if not isinstance(base_ctype, CTypeEnum):
+      continue
+
+    #if base_ctype.original_name == "ip_conntrack_infoip_conntrack_info":
+    #  print unit_toks
+    #  exit(ip_conntrack_infoip_conntrack_info)
+
+    is_forward_decl = True
+    for tok in unit_toks:
+      if "{" == tok.str:
+        is_forward_decl = False
+        break
+
+    if is_forward_decl:
       return False
 
   return True
 
 
+# Look for duplicate global enumerator constants and remove enums
+# with duplicate constants. This is a simplistic solution.
+#
+# This is mostly to address trivial cases of the following three
+# specific problems:
+#     i)   typedef struct foo { ... } foo;
+#     ii)  enum { X }; ... enum { X }; 
+#     iii) struct foo { }; ... struct foo { };
+def process_redundant_decls(units):
+  units = list(units)
+
+  enum_constants = set()
+  structs = set()
+  unions = set()
+  compounds = {
+    CTypeUnion: set(),
+    CTypeStruct: set()
+  }
+
+  open_comment = CToken("/*", CToken.COMMENT)
+  close_comment = CToken("*/", CToken.COMMENT)
+
+  T = 0
+
+  for unit_decls, unit_toks, is_typedef in units:
+    for ctype, name in unit_decls:
+      base_ctype = ctype.base_type()
+      
+      # look for duplicate definitions of enumerator constants
+      # and delete one of the enums (containing the duplicate
+      # constant).
+      if isinstance(base_ctype, CTypeEnum):
+        if ctype.is_type_use():
+          continue
+        
+        # the union has no name; delete it. This helps us avoid
+        # issues in the kernel where an enumerator constant's value
+        # is dependent on the return from an inline function, which
+        # itself is stripped from the types.
+        #
+        # we just hope that we haven't deleted an enum where one of
+        # the deleted enumerator constants is referenced elsewhere.
+        #if not base_ctype.has_name:
+        #  assert len(unit_decls) == 1
+        #  #unit_toks.insert(0, open_comment)
+        #  #unit_toks.append(close_comment)
+        #  del unit_toks[:]
+        #  break
+
+        for name in base_ctype.field_list:
+          if name in enum_constants:
+            assert len(unit_decls) == 1
+            #unit_toks.insert(0, open_comment)
+            #unit_toks.append(close_comment)
+            del unit_toks[:]
+            break
+          else:
+            enum_constants.add(name)
+
+      # look for duplicate definitions of structs / unions
+      # and delete the most recently found type.
+      elif isinstance(base_ctype, CTypeStruct) \
+      or   isinstance(base_ctype, CTypeUnion):
+
+        handled = False
+        while not ctype.is_type_use():
+
+          # try to distinguish a forward declaration from the real
+          # definition. The types of the two things will be resolved
+          if ";" == unit_toks[-1].str \
+          and CToken.TYPE_USER == unit_toks[-2].kind \
+          and CToken.TYPE_SPECIFIER == unit_toks[-3].kind:
+            break
+
+          names = compounds[base_ctype.__class__]
+          if base_ctype.internal_name in names:
+            assert len(unit_decls) == 1
+            #unit_toks.insert(0, open_comment)
+            #unit_toks.append(close_comment)
+            del unit_toks[:]
+            handled = True
+          else:
+            names.add(base_ctype.internal_name)
+          break
+
+        # no naming conflict
+        if handled or name != base_ctype.original_name:
+          continue
+
+        # hard case, we need to preserve the struct/union
+        # definition; we will try to do this by just renaming
+        # the typedef'd name.
+        if not ctype.is_type_use():
+          #print name, base_ctype.original_name, unit_toks
+          #assert CToken.TYPE_USER == unit_toks[-2].kind
+          unit_toks[-2].str += str(T)
+          T += 1
+          continue
+
+        # easy case, delete the typedef: because it's used in
+        # C++, it means the compiler will resolve the correct
+        # type.
+        else:
+          #unit_toks.insert(0, open_comment)
+          #unit_toks.append(close_comment)
+          del unit_toks[:]
+          continue
+
+
+# Remove __attribute__ ( ... ) forms from functions.
+#
+# Args:
+#   toks:         A list of tokens representing a function
+#                 declaration and which contains zero-or-more
+#                 function attributes.
+# 
+# Returns:
+#   A list of tokens without any function attributes.
+def remove_function_attributes(decls, toks):
+
+  for (ctype, _) in decls:
+    if not isinstance(ctype.base_type(), CTypeFunction):
+      return toks
+
+  new_toks = []
+  count_parens = False
+  paren_count = 0
+  i = 0
+
+  for tok in toks:
+    i += 1
+
+    if count_parens:
+      if "(" == tok.str:
+        paren_count += 1
+      elif ")" == tok.str:
+        paren_count -= 1
+        count_parens = paren_count > 0
+      continue
+
+    if tok.str in ("__attribute__", "attribute__", "__attribute"):
+      count_parens = "(" == toks[i].str
+      paren_count = 0
+      continue
+
+    new_toks.append(tok)
+
+  return new_toks
+
+
+# Process the units of C type, function, and variable declarations
+# as generated by the CParser.
+#
+# Outputs:
+#   Re-ordered declarations where ordering is determined by type
+#   dependencies.
 def process_units(units):
   global order_numbers, seen, CHANGED
   decls = []
 
-  # initialise the order numbers
+  # Initialise the order numbers
   unit_num = 0
   units = list(units)
-  for unit_decls, unit_toks, is_typedef in units:
+  for unit_decls, _, _ in units:
     decls.extend(unit_decls)
 
-  # refine until we have an ordering.
+  # Refine until we have an ordering.
   CHANGED = True
   while CHANGED:
     CHANGED = False
@@ -203,14 +391,15 @@ def process_units(units):
       new_order_num = visit_ctype(ctype, True, False)
     seen.clear()
 
-  # emit the ordered units
+  # Emit the ordered units.
   new_toks = collections.defaultdict(list)
   for unit_decls, unit_toks, is_typedef in units:
+
     if not should_include_unit(unit_decls, unit_toks, is_typedef):
       continue
 
-    # get a canonical order number for this unit that accounts
-    # for the ordering of any types defined within the unit
+    # Get a canonical order number for this unit that accounts
+    # for the ordering of any types defined within the unit.
     max_order_num = 0
     has_name = False
     for ctype, name in unit_decls:
@@ -221,6 +410,12 @@ def process_units(units):
 
     if has_name:
       max_order_num = sys.maxint
+
+    # Remove attributes from non-type declarations.
+    unit_toks = remove_function_attributes(unit_decls, unit_toks)
+
+    # Add the tokens for this unit of declarations into the
+    # total ordering.
     new_toks[max_order_num].append("\n")
     new_toks[max_order_num].extend(t.str for t in unit_toks)
 
@@ -247,4 +442,5 @@ if "__main__" == __name__:
     buff = "".join(lines_)
     tokens = CTokenizer(buff)
     units = parser.parse_units(tokens)
+    process_redundant_decls(units)
     process_units(units)
