@@ -2207,7 +2207,7 @@ def has_attribute(ctype, attr_name):
 if "__main__" == __name__:
   import sys
   with open(sys.argv[1]) as lines_:
-    buff = "".join(lines_)
+    buff = "".join(line for line in lines_ if not line.startswith("#"))
     tokens = CTokenizer(buff)
     parser = CParser()
     parser.parse(tokens)
