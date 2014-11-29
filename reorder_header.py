@@ -445,8 +445,7 @@ if "__main__" == __name__:
       else:
         source_lines.append(line)
 
-  source_buff = "".join(source_lines)
-  tokens = CTokenizer(source_buff)
+  tokens = CTokenizer(source_lines)
   units = parser.parse_units(tokens)
   process_redundant_decls(units)
   O("".join(macro_defs))
