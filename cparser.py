@@ -34,6 +34,7 @@ Author:       Peter Goodman (peter.goodman@gmail.com)
 Copyright:    Copyright 2012-2013 Peter Goodman, all rights reserved.
 """
 
+import re
 
 # Sets of all operators, grouped in terms of the length of the operators.
 OPERATORS = {
@@ -226,12 +227,11 @@ class CCharacterReader(object):
   #
   # Args:
   #   buff_:          Indexible sequence of characters.
-  def __init__(self, buff_):
-    self.buff = buff_
+  def __init__(self, lines_):
+    self.buff = self._lines_to_buff(lines_)
     self.last_idx = -1
     self.line = 1
     self.col = 0
-    self.seen_carriage_return = False
 
   # Return the length of the internal character buffer.
   #
@@ -264,18 +264,11 @@ class CCharacterReader(object):
 
     if 0 < diff:
       self.last_idx = idx
-      seen_cr, self.seen_carriage_return = self.seen_carriage_return, False
-
       if "\t" == c:
         self.col += (diff - 1) + CCharacterReader.TAB_SIZE
-      elif "\r" == c:
+      elif "\n" == c:
         self.col = 1
         self.line += 1
-        self.seen_carriage_return = True
-      elif "\n" == c:
-        if not seen_cr:
-          self.col = 1
-          self.line += 1
       else:
         self.col += diff
 
@@ -300,12 +293,31 @@ class CCharacterReader(object):
   def next_checkpoint(self):
     return CCarat(self.line, self.col + 1)
 
+  MACRO_LINE = re.compile(r"^[\s]*#")
+  COMMENT = re.compile(r"//.*$")
+
+  # Converts a line iterator into a large string, where single-line comments
+  # (beginning with `//`) and macro lines (beginning with `#`) have been
+  # stripped.
+  #
+  # Returns:
+  #   A string.
+  def _lines_to_buff(self, lines):
+    buff = []
+    for line in lines:
+      if self.MACRO_LINE.match(line):
+        continue
+      line = line.rstrip(" \t\r\n")
+      line = self.COMMENT.sub("", line)
+      line = line.rstrip(" \t")
+      buff.append(line)
+    return "\n".join(buff)
 
 class CTokenizer(object):
   """Tokenizer for something like GNU C99."""
 
-  def __init__(self, buff_):
-    self.buff = CCharacterReader(buff_)
+  def __init__(self, lines_):
+    self.buff = CCharacterReader(lines_)
     self.len = len(self.buff)
     self.pos = 0
     self.future_tokens = []
@@ -2118,12 +2130,32 @@ class CParser(object):
   def parse(self, toks):
     toks = list(toks)
     i = 0
+    brace_count = 0
     all_decls = []
     while i < len(toks):
-      carat = toks[i].carat
-      i, decls, is_typedef = self._parse_declaration(self.stab, toks, i)
-      decls = self._update_with_declarations(decls, is_typedef)
-      all_decls.extend(decls)
+      # Something like `extern "C"`.
+      if i + 1 < len(toks) and \
+      "extern" == toks[i].str and \
+      CToken.LITERAL_STRING == toks[i+1].kind:
+        i += 2
+        continue
+
+      elif "{" == toks[i].str:
+        brace_count += 1
+        i += 1
+        continue
+      
+      elif "}" == toks[i].str:
+        assert 0 < brace_count
+        brace_count -= 1
+        i += 1
+        continue
+
+      else:
+        carat = toks[i].carat
+        i, decls, is_typedef = self._parse_declaration(self.stab, toks, i)
+        decls = self._update_with_declarations(decls, is_typedef)
+        all_decls.extend(decls)
     return all_decls
 
   # Parse a C file and return the groups of declarations/definitions
@@ -2207,8 +2239,7 @@ def has_attribute(ctype, attr_name):
 if "__main__" == __name__:
   import sys
   with open(sys.argv[1]) as lines_:
-    buff = "".join(line for line in lines_ if not line.startswith("#"))
-    tokens = CTokenizer(buff)
+    tokens = CTokenizer(lines_)
     parser = CParser()
     parser.parse(tokens)
     for var, ctype in parser.vars():
