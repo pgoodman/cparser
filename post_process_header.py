@@ -55,8 +55,8 @@ def get_lines(file_name):
   buff = buff.replace(",\n", ", ")
 
   buff = re.sub(r"([^a-zA-Z_0-9])extern", r"\1\nextern", buff, flags=re.MULTILINE)
-  buff = re.sub(r"([^a-zA-Z_0-9\*])namespace", r"\1\nnamespace", buff, flags=re.MULTILINE)
-  buff = re.sub(r"(^[a-zA-Z_0-9\*])template", r"\1\ntemplate", buff, flags=re.MULTILINE)
+  buff = re.sub(r"([^a-zA-Z_0-9\*])namespace([ \t\n])", r"\1\nnamespace\2", buff, flags=re.MULTILINE)
+  buff = re.sub(r"(^[a-zA-Z_0-9\*])template([ <])", r"\1\ntemplate\2", buff, flags=re.MULTILINE)
   buff = re.sub(r"static([\r\n \t]+)", "static ", buff, flags=re.MULTILINE)
 
   buff = buff.replace("typedef", "\ntypedef")

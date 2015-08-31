@@ -118,6 +118,7 @@ class CToken(object):
     "sizeof":         OPERATOR,
     "static":         SPECIFIER_STORAGE,
     "struct":         TYPE_SPECIFIER,
+    "class":          TYPE_SPECIFIER,
     "switch":         STATEMENT_BEGIN,
     "typedef":        SPECIFIER_STORAGE,
     "union":          TYPE_SPECIFIER,
@@ -128,6 +129,7 @@ class CToken(object):
     "_Bool":          TYPE_BUILT_IN,
     "_Complex":       TYPE_BUILT_IN,
     "_Imaginary":     TYPE_BUILT_IN,
+    "operator":       EXTENSION_NO_PARAM,
 
     "wchar_t":        TYPE_MAYBE_BUILT_IN,
     
@@ -185,6 +187,8 @@ class CToken(object):
     "__visibility__": EXTENSION,
     "__warn_unused_result__": EXTENSION_NO_PARAM,
     "__weak__":       EXTENSION_NO_PARAM,
+    
+    "throw":          EXTENSION,
 
     "typeof":         TYPEOF,
     "__typeof__":     TYPEOF,
@@ -1154,6 +1158,7 @@ class CParser(object):
     "union":  CTypeUnion, 
     "enum":   CTypeEnum,
     "struct": CTypeStruct,
+    "class": CTypeStruct,
   }
 
   # Constructor for making/choosing a symbol table to use when parsing the body
@@ -1161,6 +1166,7 @@ class CParser(object):
   COMPOUND_TYPE_STAB = {
     "union":  lambda _, parent_stab: CSymbolTable(parent_stab),
     "struct": lambda _, parent_stab: CSymbolTable(parent_stab),
+    "class": lambda _, parent_stab: CSymbolTable(parent_stab),
 
     # enum gets and places its symbols in the enclosing scope. E.g. if we have
     # struct { enum { FOO } bar; };, then FOO is available in the scope in which
@@ -1288,6 +1294,23 @@ class CParser(object):
     # this nesting is akin to namespacing.
     self.type_stack = []
 
+  # Parse a class.
+  #
+  # Args:
+  #   stab:           Symbol table in which to place new names.
+  #   ctype:          The type object representing the type that we are currently
+  #                   parsing.
+  #   outer_toks:     The token stream from which we will extract only those
+  #                   tokens (`toks`) belonging to this compound type definition.
+  #   j:              Our current cursor position in the `outer_toks` (the
+  #                   position of the opening '{')
+  #
+  # Returns:
+  #   The position in toks to continue parsing (immediately following the
+  #   closing } of the compound type definition).
+  def _parse_class_type(self, stab, class_ctype, outer_toks, j):
+    return self._get_up_to_balanced(outer_toks, [], j, "{")
+
   # Parse a union or struct.
   #
   # Args:
@@ -1410,6 +1433,7 @@ class CParser(object):
   # Specific parsing functions for each type of compound user-defined type.
   COMPOUND_TYPE_PARSER = {
     "struct": _parse_struct_union_type,
+    "class": _parse_class_type,
     "union": _parse_struct_union_type,
     "enum": _parse_enum_type,
   }
@@ -1826,10 +1850,17 @@ class CParser(object):
       # global variable that is assigned a default value.
       elif "=" == t.str:
         i, expr = self._parse_expression(stab, toks, i + 1, can_have_comma=True)
+
+      # C++ operator overload; skip over it.
+      elif "operator" == t.str:
+        while i < len(toks) and ";" != toks[i]:
+          i = i+1
+        return (i+1, None, None, None)
+
       else:
-        #print
-        #print repr(t.str), t.carat.line, t.carat.column, ctype
-        #print
+        print
+        print repr(t.str), t.carat.line, t.carat.column, ctype
+        print
         assert False
 
     if call_recursive:
@@ -2123,15 +2154,23 @@ class CParser(object):
       i += 1
     return decls
 
-  # Parse a C file.
+  # Parse a C file and return the groups of declarations/definitions
+  # along with all tokens belonging to those groups. This makes it
+  # easier to re-order the declarations / definitions within a C file
+  # just in case the file contains minor errors (e.g. use-before-def
+  # of a type).
   #
   # Returns:
-  #   A list of C declarations (AST nodes).
-  def parse(self, toks):
+  #   A list of 3-tuples `(decls, toks, is_typedef)` where `decls` is a
+  #   list of `(ctype, name)` pairs of declarations in this group, `toks`
+  #   is a list of the tokens used in all declarations of the group, and
+  #   `is_typedef` is True iff this group defines a type.
+  def parse_units(self, toks):
     toks = list(toks)
+    groups = []
     i = 0
     brace_count = 0
-    all_decls = []
+    
     while i < len(toks):
       # Something like `extern "C"`.
       if i + 1 < len(toks) and \
@@ -2152,32 +2191,10 @@ class CParser(object):
         continue
 
       else:
-        carat = toks[i].carat
+        prev_i = i
         i, decls, is_typedef = self._parse_declaration(self.stab, toks, i)
         decls = self._update_with_declarations(decls, is_typedef)
-        all_decls.extend(decls)
-    return all_decls
-
-  # Parse a C file and return the groups of declarations/definitions
-  # along with all tokens belonging to those groups. This makes it
-  # easier to re-order the declarations / definitions within a C file
-  # just in case the file contains minor errors (e.g. use-before-def
-  # of a type).
-  #
-  # Returns:
-  #   A list of 3-tuples `(decls, toks, is_typedef)` where `decls` is a
-  #   list of `(ctype, name)` pairs of declarations in this group, `toks`
-  #   is a list of the tokens used in all declarations of the group, and
-  #   `is_typedef` is True iff this group defines a type.
-  def parse_units(self, toks):
-    toks = list(toks)
-    groups = []
-    i = 0
-    while i < len(toks):
-      prev_i = i
-      i, decls, is_typedef = self._parse_declaration(self.stab, toks, i)
-      decls = self._update_with_declarations(decls, is_typedef)
-      groups.append((decls, toks[prev_i:i], is_typedef))
+        groups.append((decls, toks[prev_i:i], is_typedef))
     return groups
 
   # Generate pairs of variables/functions and their types at the global 
@@ -2233,15 +2250,4 @@ def has_attribute(ctype, attr_name):
       ctype = ctype.unaliased_type()
   return False
 
-
-
-# for testing
-if "__main__" == __name__:
-  import sys
-  with open(sys.argv[1]) as lines_:
-    tokens = CTokenizer(lines_)
-    parser = CParser()
-    parser.parse(tokens)
-    for var, ctype in parser.vars():
-      print var, ctype
 
