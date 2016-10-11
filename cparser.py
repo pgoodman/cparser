@@ -656,7 +656,6 @@ class CType(object):
       ctype = ctype.used_type().unattributed_type().unaliased_type()
     return ctype
 
-
 class CTypeCompound(CType):
   """Base class for user-defined compound types."""
   pass
@@ -830,13 +829,12 @@ class CTypePointer(CType):
 
   __slots__ = ('ctype', 'is_const', 'is_restrict', 'is_volatile')
 
-  def __init__(self, ctype_, **kargs):
+  def __init__(self, ctype_, pointer_size):
     self.ctype = ctype_
     self.is_const = False
     self.is_restrict = False
     self.is_volatile = False
-    for k in kargs:
-      setattr(self, k, kargs[k])
+    self.size = pointer_size
 
   def __repr__(self):
     c = self.is_const     and "const "    or ""
@@ -967,6 +965,7 @@ class CTypeAttributed(CType):
 
   def __repr__(self):
     return "Attributed(%s, %s)" % (repr(self.attrs), repr(self.ctype))
+
 
 class CTypeExpression(CType):
   """Represents a type that is computed by some expression e.g.: typeof (...)."""
@@ -1192,11 +1191,6 @@ class CParser(object):
   T_DL  = CTypeBuiltIn("long double", True)
   T_WC  = CTypeBuiltIn("wchar_t")
 
-  T_CHR = CTypeAttributed(T_C, CTypeAttributes(is_const=True))
-  T_STR = CTypePointer(T_C, is_const=True)
-  T_INT = CTypeAttributed(T_LL, CTypeAttributes(is_const=True))
-  T_FLT = CTypeAttributed(T_D, CTypeAttributes(is_const=True))
-
   VA_LIST = CTypeBuiltIn("__builtin_va_list")
 
   T_FC = CTypeBuiltIn("float _Complex", True)
@@ -1279,7 +1273,8 @@ class CParser(object):
   }
 
   # Initialise the parser.
-  def __init__(self):
+  def __init__(self, pointer_size=64):
+    self.pointer_size = pointer_size
 
     # The global symbol table.
     self.stab = CSymbolTable()
@@ -1857,6 +1852,12 @@ class CParser(object):
           i = i+1
         return (i+1, None, None, None)
 
+      # Assume it's a function body. Return the index of the `}` to break out
+      # of the loop in getting a declaration.
+      elif "{" == t.str:
+        i = self._get_up_to_balanced(toks, [], i, "{") - 1
+        break
+
       else:
         print
         print repr(t.str), t.carat.line, t.carat.column, ctype
@@ -1895,7 +1896,7 @@ class CParser(object):
           base = CTypeAttributed(base, name_attrs)
           has_attrs = False
           name_attrs = CTypeNameAttributes()
-        base = CTypePointer(base)
+        base = CTypePointer(base, self.pointer_size)
 
       # qualifiers: const, restrict, volatile
       elif hasattr(base, "is_" + t.str):
