@@ -1863,6 +1863,7 @@ class CParser(object):
         break
 
       else:
+        continue  # Skip over it.
         print
         print repr(t.str), t.carat.line, t.carat.column, ctype
         print
