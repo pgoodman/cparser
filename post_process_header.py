@@ -39,7 +39,7 @@ def get_lines(file_name):
         macro_defs.append(stip_line)
 
       # Ignore  pre-processor line numbers
-      elif not strip_line.startswith("#"):
+      elif not strip_line.startswith("#") and not strip_line.startswith("//"):
         all_lines.append(strip_line)
 
   # Inject new lines in a structured manner

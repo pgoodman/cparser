@@ -189,6 +189,7 @@ class CToken(object):
     "__weak__":       EXTENSION_NO_PARAM,
     
     "throw":          EXTENSION,
+    "noexcept":       EXTENSION_NO_PARAM,
 
     "typeof":         TYPEOF,
     "__typeof__":     TYPEOF,
@@ -655,6 +656,7 @@ class CType(object):
       prev_type = ctype
       ctype = ctype.used_type().unattributed_type().unaliased_type()
     return ctype
+
 
 class CTypeCompound(CType):
   """Base class for user-defined compound types."""
@@ -1157,7 +1159,7 @@ class CParser(object):
     "union":  CTypeUnion, 
     "enum":   CTypeEnum,
     "struct": CTypeStruct,
-    "class": CTypeStruct,
+    "class":  CTypeStruct,
   }
 
   # Constructor for making/choosing a symbol table to use when parsing the body
@@ -1165,7 +1167,7 @@ class CParser(object):
   COMPOUND_TYPE_STAB = {
     "union":  lambda _, parent_stab: CSymbolTable(parent_stab),
     "struct": lambda _, parent_stab: CSymbolTable(parent_stab),
-    "class": lambda _, parent_stab: CSymbolTable(parent_stab),
+    "class":  lambda _, parent_stab: CSymbolTable(parent_stab),
 
     # enum gets and places its symbols in the enclosing scope. E.g. if we have
     # struct { enum { FOO } bar; };, then FOO is available in the scope in which
@@ -1449,6 +1451,7 @@ class CParser(object):
 
     specs = []
     decls = []
+    ctype = None
     
     # extraneous useless declaration enders
     if i < len(toks):
@@ -1471,13 +1474,14 @@ class CParser(object):
       i, ctype, ctype_name_attrs, name = self._parse_declarator(
           stab, specs_ctype, CTypeNameAttributes(name_attrs),
           toks, i, end_on_comma)
-      
-      if not ctype_name_attrs.has_default_attrs():
-        ctype = CTypeAttributed(ctype, ctype_name_attrs)
+
+      if ctype and name:
+        if not ctype_name_attrs.has_default_attrs():
+          ctype = CTypeAttributed(ctype, ctype_name_attrs)
 
       decls.append((ctype, name))
 
-    if not has_declarator: # e.g. function parameter
+    if not ctype and specs_ctype: # e.g. function parameter
       decls.append((specs_ctype, None))
 
     return i, decls, defines_type
@@ -1818,9 +1822,9 @@ class CParser(object):
 
       # function parameter list
       elif "(" == t.str:
-        expr_toks = []
-        i = self._get_up_to_balanced(toks, expr_toks, i, t.str)
-        ctype = self._parse_param_list(stab, ctype, expr_toks)
+        param_toks = []
+        i = self._get_up_to_balanced(toks, param_toks, i, t.str)
+        ctype = self._parse_param_list(stab, ctype, param_toks)
 
       # compiler-specific extensions (parameterized)
       elif CToken.EXTENSION == t.kind:
@@ -1924,6 +1928,10 @@ class CParser(object):
         has_attrs = True
         continue
 
+      # C++ operator overload.
+      elif "operator" == t.str:
+        break
+
       # compiler-specific attributes (non-parameterized)
       elif CToken.EXTENSION_NO_PARAM == t.kind:
         name_attrs.attrs[name_attrs.LEFT].append(t)
@@ -1956,6 +1964,9 @@ class CParser(object):
 
       i, decls, is_typedef = self._parse_declaration(
           self.stab, toks, i, end_on_comma=True)
+
+      if not decls:
+        continue
 
       assert not is_typedef
       assert 1 == len(decls)
@@ -2177,8 +2188,20 @@ class CParser(object):
       if i + 1 < len(toks) and \
       "extern" == toks[i].str and \
       CToken.LITERAL_STRING == toks[i+1].kind:
-        i += 2
-        continue
+
+        extern_kind = toks[i+1].str.upper()
+        if '"C++"' == extern_kind:
+          i = self._get_up_to_balanced(toks, [], i, "{")
+          continue
+        elif '"C"' == extern_kind:
+          i += 2
+          continue
+        else:
+          assert False
+
+      # Ignore C++ classes.
+      elif "class" == toks[i].str:
+        i = self._get_up_to_balanced(toks, [], i, "{")
 
       elif "{" == toks[i].str:
         brace_count += 1
@@ -2186,8 +2209,15 @@ class CParser(object):
         continue
       
       elif "}" == toks[i].str:
+        if not 0 < brace_count:
+          t = toks[i]
+          print t.str, t.carat.line, t.carat.column
         assert 0 < brace_count
         brace_count -= 1
+        i += 1
+        continue
+
+      elif ";" == toks[i].str:
         i += 1
         continue
 
