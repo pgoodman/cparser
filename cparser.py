@@ -1645,7 +1645,6 @@ class CParser(object):
         #
         # Note: this modifies the global stab, not the local one!!
         else:
-          sys.stderr.write("/* {} {} {} */\n".format(repr(ctype), defines_type, t.str))
           t.kind = CToken.TYPE_USER
           self.stab.set_type(t.str,
               CTypeDefinition(t.str, CParser.T_I, is_missing=True))
@@ -2213,7 +2212,6 @@ class CParser(object):
           if "{" == toks[i+2]:
             intern_toks = []
             i = self._get_up_to_balanced(toks, intern_toks, i, "{")
-            sys.stderr.write(repr(intern_toks))
             groups.extend(self.parse_units(intern_toks))
           else:
             i += 2
