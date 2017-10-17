@@ -15,6 +15,6 @@ if "__main__" == __name__:
       ctype = ctype.unattributed_type()
       if isinstance(ctype, CTypeFunction):
         if ctype.is_variadic:
-          print name, 12, "C", "N"
+          print name, 16, "C", "N"
         else:
           print name, len(ctype.param_types), "C", "N"
