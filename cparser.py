@@ -1163,6 +1163,9 @@ class CSymbolTable(object):
   # Get a type by its name and it's type constructor
   def get_type(self, name, const):
     assert const in self._types
+    if name not in self._types[const]:
+      type_obj = const(name)
+      self._types[const][name] = type_obj
     assert name in self._types[const]
     return self._types[const][name]
 
@@ -1548,6 +1551,13 @@ class CParser(object):
       
       if "typedef" == t.str:
         defines_type = True
+
+      # Handle `extern "C"` in the case `extern extern "C" void blah();`.
+      elif "extern" == t.str and \
+           i < len(toks) and \
+           CToken.LITERAL_STRING == toks[i].kind:  # Note: i is the next token.
+        i += 1
+        continue
 
       # special case 1: these can either set the type, or modify it.
       elif t.str in ("signed", "__signed__"):
