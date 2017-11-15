@@ -1709,7 +1709,8 @@ class CParser(object):
         might_have_type = True
         t2 = toks[i]
 
-        # Eat up things like `alignas` in `struct alignas(..) Foo`.
+        # Eat up things like `alignas` in `struct alignas(..) Foo`. This is
+        # mostly a C++11 feature.
         while t2.kind == CToken.EXTENSION:
           extension_toks = []
           i = self._get_up_to_balanced(toks, extension_toks, i - 1, "(", include=True)
@@ -1723,6 +1724,18 @@ class CParser(object):
         constructor = CParser.COMPOUND_TYPE[t.str]
         parser = CParser.COMPOUND_TYPE_PARSER[t.str]
 
+        # Handle enums with their backing storage being defined, e.g.
+        # `enum Foo : int;`, `enum : int`, or `enum Foo : int { ... };`.
+        # This is a C++11 feature.
+        if t.str == "enum" and ((t2.kind == CToken.LITERAL_IDENTIFIER and \
+           t3 and t3.str == ":") or t2.str == ":"):
+          j = i + 1
+          while j < len(toks):
+            if toks[j].str in ";{":
+              t3 = toks[j]
+              i = j - 1
+              break
+            j += 1
 
         # type definition
         if t2.kind == CToken.LITERAL_IDENTIFIER and t3 and "{" == t3.str:
@@ -1807,9 +1820,9 @@ class CParser(object):
 
 
     if not ctype:
-      print toks[i:i+20]
-      print toks[i].str, toks[i].kind, stab.has_type(toks[i].str, CTypeDefinition)
-      print carat.line, carat.column
+      print >> sys.stderr, toks[i:i+20]
+      print >> sys.stderr, toks[i].str, toks[i].kind, stab.has_type(toks[i].str, CTypeDefinition)
+      print >> sys.stderr, carat.line, carat.column
     assert ctype
     return i, ctype, defines_type
 
