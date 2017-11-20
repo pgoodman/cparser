@@ -5,8 +5,9 @@ Author:       Peter Goodman (peter.goodman@gmail.com)
 Copyright:    Copyright 2012-2013 Peter Goodman, all rights reserved.
 """
 
+import fileinput
 import re
-
+import sys
 
 def O(*args):
   line = "".join(map(str, args))
@@ -15,7 +16,7 @@ def O(*args):
   if "(^" not in line:
     print line
 
-def get_lines(file_name):
+def get_lines(lines):
   """Get the lines of a file as a list of strings such that no line has
   more than one brace, and that every line is C/C++ and not pre-processor
   line directives."""
@@ -23,22 +24,21 @@ def get_lines(file_name):
   all_lines = []
 
   # remove empty lines and new lines
-  with open(file_name) as lines:
-    for line in lines:
-      strip_line = line.strip(" \n\r\t")
-      if not strip_line:
-        continue
-      
-      # Turn things like `#  define` into `#define`.
-      strip_line = strip_line.replace(r"#[ ]+", "#")
-      if strip_line.startswith("#"):
-        if strip_line.startswith("#define"):
-          macro_defs.append(strip_line)
-        continue
+  for line in lines:
+    strip_line = line.strip(" \n\r\t")
+    if not strip_line:
+      continue
+    
+    # Turn things like `#  define` into `#define`.
+    strip_line = strip_line.replace(r"#[ ]+", "#")
+    if strip_line.startswith("#"):
+      if strip_line.startswith("#define"):
+        macro_defs.append(strip_line)
+      continue
 
-      # Ignore  pre-processor line numbers
-      if not strip_line.startswith("//"):
-        all_lines.append(strip_line)
+    # Ignore  pre-processor line numbers
+    if not strip_line.startswith("//"):
+      all_lines.append(strip_line)
 
   # # Inject new lines in a structured manner
   buff = " ".join(all_lines)
@@ -54,7 +54,6 @@ def get_lines(file_name):
 
 
 if "__main__" == __name__:
-  import sys
-  macro_defs, lines = get_lines(sys.argv[1])
+  macro_defs, lines = get_lines(fileinput.input())
   for line in lines:
     O(line)

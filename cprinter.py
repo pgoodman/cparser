@@ -32,7 +32,7 @@ def pretty_print_type(ctype, inner="", lang="C"):
 
     if not param_types and not ctype.is_old_style_variadic:
       param_types.append("void")
-
+    
     inner = "(%s%s)(%s)" % (s, inner, ", ".join(param_types))
     return pretty_print_type(ctype.ret_type, inner=inner, lang=lang)
 
