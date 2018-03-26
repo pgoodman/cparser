@@ -117,6 +117,7 @@ class CToken(object):
     "register":       SPECIFIER_STORAGE,
     "restrict":       TYPE_QUALIFIER,
     "__restrict":     TYPE_QUALIFIER,
+    "__restrict__":   TYPE_QUALIFIER,
     "return":         STATEMENT_BEGIN,
     "short":          TYPE_BUILT_IN,
     "signed":         TYPE_BUILT_IN,
@@ -1303,6 +1304,7 @@ class CParser(object):
     "__inline":             "inline",
     "__const":              "const",
     "__restrict":           "restrict",
+    "__restrict__":         "restrict",
   }
 
   # Initialise the parser.
