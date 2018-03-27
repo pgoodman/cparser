@@ -4,9 +4,6 @@ import sys
 import fileinput
 from cparser import *
 
-# cache for "is this type a function pointer?"
-global POINTER_CACHE
-POINTER_CACHE = {}
 # cache for "is this type a function?"
 global FUNCTION_CACHE
 FUNCTION_CACHE = {}
@@ -15,14 +12,26 @@ global STATS
 STATS = {}
 
 
-def has_function(args):
+def has_function(seen=None, *args):
   """ Check if any member of `args` is a function, or will lead to a function
       For example, a typedef, a use or a pointer with many indirections
   """
   global FUNCTION_CACHE
 
+  # maintain a cache of types visited in this has_function stack
+  if seen is None:
+    seen = set()
+
   for arg in args:
-    # Check if this specific argument has already been processed
+    # Check if this argument has already been processed
+    # if yes, exit to avoid infinite recursion
+    if arg in seen:
+      return False
+
+    # we have now seen this argument, to prevent infinite recursion
+    seen.add(arg)
+
+    # check if we have a cached determination
     cached = FUNCTION_CACHE.get(arg, None)
     if cached is not None:
       if cached == True:
@@ -30,19 +39,14 @@ def has_function(args):
       else:
         continue
 
-    # assume this is not a function, and prevent
-    # infinite recursion depth from recursive definitions
-    FUNCTION_CACHE[arg] = False
-
-    #sys.stdout.write("Testing for function: {}\n".format(repr(arg)))
     # If we find a pointer, check if it points to a function
     if isinstance(arg, CTypePointer):
-      if has_function([arg.ctype]):
+      if has_function(seen, arg.ctype):
         FUNCTION_CACHE[arg] = True
         return True
     elif isinstance(arg, CTypeArray):
       # is it an array of functions (is that even a thing?)
-      if has_function([arg.ctype]):
+      if has_function(seen, arg.ctype):
         FUNCTION_CACHE[arg] = True
         return True
     elif isinstance(arg, CTypeFunction):
@@ -51,88 +55,31 @@ def has_function(args):
       return True
     elif isinstance(arg, CTypeDefinition):
       # Maybe a typedef of function?
-      if has_function([arg.ctype]):
+      if has_function(seen, arg.ctype):
         FUNCTION_CACHE[arg] = True
         return True
     elif isinstance(arg, CTypeUse):
       # Maybe a use of a function?
-      if has_function([arg.ctype]):
+      if has_function(seen, arg.ctype):
         FUNCTION_CACHE[arg] = True
-        return True
-    elif isinstance(arg, tuple):
-      if has_function(arg):
-        FUNCTION_CACHE[arg] = True
-        return True
-    else:
-      continue
-
-  # None of these args are a function
-  return False
-
-def has_function_pointer(args):
-  """ Return true if any of the args is a function pointer, or a compound type that
-      at some point will contain a function pointer
-  """
-
-  global POINTER_CACHE
-  # check if this type has already been checked
-  for arg in args:
-    cached = POINTER_CACHE.get(arg, None)
-    if cached is not None:
-      if cached == True:
-        return True
-      else:
-        continue
-
-    # assume this is not a function pointer, and prevent
-    # infinite recursion depth from recursive definitions
-    POINTER_CACHE[arg] = False
-
-    # If we find a pointer, check if it points to a function
-    if isinstance(arg, CTypePointer):
-      if has_function([arg.ctype]):
-        # this is a pointer to a function
-        POINTER_CACHE[arg] = True
-        return True
-      else:
-        # maybe its a pointer to a structure/union/etc which has a pointer to a function?
-        if has_function_pointer([arg.ctype]):
-          POINTER_CACHE[arg] = True
-          return True
-    elif isinstance(arg, CTypeArray):
-      # is it an array of something that has function pointers?
-      if has_function_pointer([arg.ctype]):
-        POINTER_CACHE[arg] = True
         return True
     elif isinstance(arg, CTypeStruct):
-      # Does the struct have a member that may have a function pointer?
-      if has_function_pointer(list(arg.fields())):
-        POINTER_CACHE[arg] = True
+      # Does the struct have a member that may have a function?
+      if has_function(seen, *list(arg.fields())):
+        FUNCTION_CACHE[arg] = True
         return True
     elif isinstance(arg, CTypeUnion):
-      # does the union have a member that may be a function pointer?
-      if has_function_pointer(list(arg.fields())):
-        POINTER_CACHE[arg] = True
-        return True
-    elif isinstance(arg, CTypeDefinition):
-      # Maybe a typedef of function pointer?
-      if has_function_pointer([arg.ctype]):
-        POINTER_CACHE[arg] = True
-        return True
-    elif isinstance(arg, CTypeUse):
-      # Maybe a typedef of function pointer?
-      if has_function_pointer([arg.ctype]):
-        POINTER_CACHE[arg] = True
+      # does the union have a member that may be a function?
+      if has_function(seen, *list(arg.fields())):
+        FUNCTION_CACHE[arg] = True
         return True
     elif isinstance(arg, tuple):
-      if has_function_pointer(arg):
-        POINTER_CACHE[arg] = True
+      if has_function(seen, *arg):
+        FUNCTION_CACHE[arg] = True
         return True
     else:
-      #sys.stdout.write("Arg is: {}\n".format(type(arg)))
       continue
 
-  # could not find a function pointer arg
   return False
 
 def print_header():
@@ -159,7 +106,6 @@ def print_footer():
   sys.stdout.write("// Total emitted in __mcsema_externs : {s[emitted]}\n".format(s=STATS))
   sys.stdout.write("// Excluded variadic functions: {s[variadic]}\n".format(s=STATS))
   sys.stdout.write("// Excluded due to callbacks: {s[callback]}\n".format(s=STATS))
-  sys.stdout.write("// Types cached: {}\n".format(len(POINTER_CACHE)))
 
 def print_entry(fn):
   sys.stdout.write("  reinterpret_cast<void *>({}),\n".format(fn))
@@ -192,7 +138,7 @@ if "__main__" == __name__:
           # and only stack-based arguments are properly handled
           sys.stdout.write("  // skipping because varargs function: {}\n".format(name))
           STATS['variadic'] += 1
-        elif has_function_pointer(ctype.param_types):
+        elif has_function(None, *ctype.param_types):
           # skip anything which may call back into lifted code, because the stack will be wrong
           sys.stdout.write("  // skipping because function pointer args: {}\n".format(name))
           STATS['callback'] += 1

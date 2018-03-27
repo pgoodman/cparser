@@ -25,6 +25,15 @@ struct nocall {
   char arr[500];
 };
 
+struct X;
+typedef struct X Y;
+struct X {
+    Y *next;
+    void (*foo)(void);
+};
+void my_callback_struct_recursive(struct X *z);
+void my_callback_struct_recursive2(Y *z);
+
 int my_callback_function(int a, callback c);
 int my_callback_function_array(int a, callback c[]);
 int my_callback_function_array_fixed(int a, callback c[5]);
