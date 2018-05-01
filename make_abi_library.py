@@ -71,10 +71,10 @@ def has_function(*args):
   for arg in args:
     if arg not in FUNCTION_CACHE:
       FUNCTION_CACHE[arg] = _has_function(set(), arg)
-      has_func = has_func or FUNCTION_CACHE[arg]
-      if has_func:
-        # no need to look through all arguments once we find a function
-        break
+    has_func = has_func or FUNCTION_CACHE[arg]
+    if has_func:
+      # no need to look through all arguments once we find a function
+      break
 
   return has_func
 
