@@ -12,15 +12,10 @@ global STATS
 STATS = {}
 
 
-def has_function(seen=None, *args):
+def _has_function(seen, *args):
   """ Check if any member of `args` is a function, or will lead to a function
       For example, a typedef, a use or a pointer with many indirections
   """
-  global FUNCTION_CACHE
-
-  # maintain a cache of types visited in this has_function stack
-  if seen is None:
-    seen = set()
 
   for arg in args:
     # Check if this argument has already been processed
@@ -31,56 +26,57 @@ def has_function(seen=None, *args):
     # we have now seen this argument, to prevent infinite recursion
     seen.add(arg)
 
-    # check if we have a cached determination
-    cached = FUNCTION_CACHE.get(arg, None)
-    if cached is not None:
-      if cached == True:
-        return True
-      else:
-        continue
-
     # If we find a pointer, check if it points to a function
     if isinstance(arg, CTypePointer):
-      if has_function(seen, arg.ctype):
-        FUNCTION_CACHE[arg] = True
+      if _has_function(seen, arg.ctype):
         return True
     elif isinstance(arg, CTypeArray):
       # is it an array of functions (is that even a thing?)
-      if has_function(seen, arg.ctype):
-        FUNCTION_CACHE[arg] = True
+      if _has_function(seen, arg.ctype):
         return True
     elif isinstance(arg, CTypeFunction):
       # its a function
-      FUNCTION_CACHE[arg] = True
       return True
     elif isinstance(arg, CTypeDefinition):
       # Maybe a typedef of function?
-      if has_function(seen, arg.ctype):
-        FUNCTION_CACHE[arg] = True
+      if _has_function(seen, arg.ctype):
         return True
     elif isinstance(arg, CTypeUse):
       # Maybe a use of a function?
-      if has_function(seen, arg.ctype):
-        FUNCTION_CACHE[arg] = True
+      if _has_function(seen, arg.ctype):
         return True
     elif isinstance(arg, CTypeStruct):
       # Does the struct have a member that may have a function?
-      if has_function(seen, *list(arg.fields())):
-        FUNCTION_CACHE[arg] = True
+      if _has_function(seen, *list(arg.fields())):
         return True
     elif isinstance(arg, CTypeUnion):
       # does the union have a member that may be a function?
-      if has_function(seen, *list(arg.fields())):
-        FUNCTION_CACHE[arg] = True
+      if _has_function(seen, *list(arg.fields())):
         return True
     elif isinstance(arg, tuple):
-      if has_function(seen, *arg):
-        FUNCTION_CACHE[arg] = True
+      if _has_function(seen, *arg):
         return True
     else:
       continue
 
   return False
+
+def has_function(*args):
+
+  # caching wraper for _has_function
+  global FUNCTION_CACHE
+  has_func = False
+  # check if any of the arguments can lead to a function
+  # if yes, then this call may have a function argument
+  for arg in args:
+    if arg not in FUNCTION_CACHE:
+      FUNCTION_CACHE[arg] = _has_function(set(), arg)
+      has_func = has_func or FUNCTION_CACHE[arg]
+      if has_func:
+        # no need to look through all arguments once we find a function
+        break
+
+  return has_func
 
 def print_header():
   header = """
