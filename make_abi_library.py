@@ -104,7 +104,8 @@ def print_footer():
   sys.stdout.write("// Excluded due to callbacks: {s[callback]}\n".format(s=STATS))
 
 def print_entry(fn):
-  sys.stdout.write("  reinterpret_cast<void *>({}),\n".format(fn))
+  # emit C-style cast to be compatible with C
+  sys.stdout.write("  (void *)({}),\n".format(fn))
 
 if "__main__" == __name__:
   source_lines = []
