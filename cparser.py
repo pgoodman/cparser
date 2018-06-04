@@ -205,6 +205,9 @@ class CToken(object):
     "__warn_unused_result__": EXTENSION_NO_PARAM,
     "__weak__":       EXTENSION_NO_PARAM,
     
+    "_Nonnull":       EXTENSION_NO_PARAM,
+    "_Nullable":       EXTENSION_NO_PARAM,
+    
     "throw":          EXTENSION,
     "noexcept":       EXTENSION_NO_PARAM,
 
