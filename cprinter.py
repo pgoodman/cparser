@@ -7,6 +7,8 @@ Copyright:    Copyright 2012-2013 Peter Goodman, all rights reserved.
 # Note: some of this isn't 100% right, especially where function pointers are
 #       concerned.
 
+import sys
+import fileinput
 from cparser import *
 
 # Pretty-print a CType instance into valid C.
@@ -110,3 +112,15 @@ def pretty_print_type(ctype, inner="", lang="C"):
 
   return s.strip(" ")
 
+if "__main__" == __name__:
+  source_lines = []
+  for line in fileinput.input():
+    if not line.startswith("#"):
+      source_lines.append(line)
+
+  units = CParser().parse_units(CTokenizer(source_lines))
+  for decls, toks, defines_type in units:
+    for ctype, name in decls:
+      print "/* {} */".format(ctype)
+    print " ".join(tok.str for tok in toks)
+    print
