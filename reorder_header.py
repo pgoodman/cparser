@@ -12,9 +12,11 @@ from cparser import *
 
 parser = CParser()
 order_numbers = collections.defaultdict(int)
+times_changed = collections.defaultdict(int)
 seen = set()
 COMPOUNDS = set()
 CHANGED = False
+MAX_TIMES = 256
 
 
 def O(*args):
@@ -166,8 +168,11 @@ def visit_ctype(ctype, is_value, need_value):
             ctype, is_value, need_value, old_order_num))
 
     if order_num > old_order_num:
-      CHANGED = True
       order_numbers[seen_id] = order_num
+      
+      times_changed[ctype] += 1
+      if times_changed[ctype] < MAX_TIMES:
+        CHANGED = True
 
   return order_num
 
